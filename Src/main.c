@@ -302,6 +302,8 @@ fastPID stallPid = { // 1khz loop time
     .output_limit = 50000
 };
 
+
+uint8_t newPacketReceived;
 EEprom_t eepromBuffer;
 char send_esc_info_flag;
 uint32_t eeprom_address = EEPROM_START_ADD; 
@@ -324,6 +326,7 @@ uint16_t stall_protect_target_interval = TARGET_STALL_PROTECTION_INTERVAL;
 uint16_t enter_sine_angle = 180;
 char do_once_sinemode = 0;
 uint8_t auto_advance_level;
+
 
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100; // anything below this point considered 0
@@ -1105,27 +1108,27 @@ if (!stepper_sine && armed) {
         }
 
         if (input < 47 + (80 * eepromBuffer.use_sine_start)) {
-            if (play_tone_flag != 0) {
-                switch (play_tone_flag) {
-									
-                case 1:
-                    playDefaultTone();
-                    break;
-                case 2:
-                    playChangedTone();
-                    break;
-                case 3:
-                    playBeaconTune3();
-                    break;
-                case 4:
-                    playInputTune2();
-                    break;
-                case 5:
-                    playDefaultTone();
-                    break;
-                }
-                play_tone_flag = 0;
-            }
+//            if (play_tone_flag != 0) {
+//                switch (play_tone_flag) {
+//									
+//                case 1:
+//                    playDefaultTone();
+//                    break;
+//                case 2:
+//                    playChangedTone();
+//                    break;
+//                case 3:
+//                    playBeaconTune3();
+//                    break;
+//                case 4:
+//                    playInputTune2();
+//                    break;
+//                case 5:
+//                    playDefaultTone();
+//                    break;
+//                }
+//                play_tone_flag = 0;
+//            }
 
             if (!eepromBuffer.comp_pwm) {
                 duty_cycle_setpoint = 0;
@@ -1310,6 +1313,27 @@ if(!beeping){
 #endif
         if (one_khz_loop_counter > PID_LOOP_DIVIDER) { // 1khz PID loop
             one_khz_loop_counter = 0;
+            if (play_tone_flag != 0) {
+                switch (play_tone_flag) {
+									
+                case 1:
+                    playDefaultTone();
+                    break;
+                case 2:
+                    playChangedTone();
+                    break;
+                case 3:
+                    playBeaconTune3();
+                    break;
+                case 4:
+                    playInputTune2();
+                    break;
+                case 5:
+                    playDefaultTone();
+                    break;
+                }
+                play_tone_flag = 0;
+            }
             if (use_current_limit && running) {
                 use_current_limit_adjust -= (int16_t)(doPidCalculations(&currentPid, actual_current,
                                                           eepromBuffer.limits.current * 2 * 100)
@@ -1409,6 +1433,8 @@ if(!beeping){
         last_duty_cycle = duty_cycle;
         SET_AUTO_RELOAD_PWM(tim1_arr);
         SET_DUTY_CYCLE_ALL(adjusted_duty_cycle);
+        newPacketReceived = 0;
+
     }
 #endif // ndef brushed_mode
 #if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)
@@ -1422,7 +1448,7 @@ if(!beeping){
     }
 
 #else
-    signaltimeout++;
+  signaltimeout++;
 
 #endif
 }
@@ -1442,11 +1468,12 @@ void processDshot()
     }
     #ifdef USE_SERIAL_TELEMETRY
        if (send_telemetry) {
+      //   if(!beeping){
             makeTelemPackage((int8_t)degrees_celsius, battery_voltage, actual_current,
                 (uint16_t)(consumed_current >> 16), e_rpm);
             send_telem_DMA(10);
             send_telemetry = 0;
-
+      //    }
         } else if(send_esc_info_flag ) {
            makeInfoPacket();
            send_telem_DMA(49);
@@ -1454,6 +1481,17 @@ void processDshot()
         }
     #endif
     setInput();
+    newPacketReceived = 1;
+#if defined(STMICRO)
+            ADC_DMA_Callback();
+            LL_ADC_REG_StartConversion(ADC1);
+            converted_degrees = __LL_ADC_CALC_TEMPERATURE(3300, ADC_raw_temp, LL_ADC_RESOLUTION_12B);
+#endif
+#ifdef ARTERY
+            ADC_DMA_Callback();
+            adc_ordinary_software_trigger_enable(ADC1, TRUE);
+            converted_degrees = getConvertedDegrees(ADC_raw_temp);
+#endif
 }
 
 void advanceincrement()
@@ -1750,7 +1788,7 @@ int main(void)
 	#endif
 #endif
     zero_input_count = 0;
-    MX_IWDG_Init();
+  //  MX_IWDG_Init();
     RELOAD_WATCHDOG_COUNTER();
 #ifdef GIMBAL_MODE
     eepromBuffer.bi_direction = 1;
@@ -1787,7 +1825,7 @@ int main(void)
 #ifdef NEUTRONRC_G071
     setInputPullDown();
 #else
-    setInputPullUp();
+    setInputPullDown();
 #endif
 
 #ifdef USE_INVERTED_HIGH
@@ -1964,9 +2002,9 @@ if(zero_crosses < 5){
         adc_counter++;
         if (adc_counter > 200) { // for adc and telemetry
 #if defined(STMICRO)
-            ADC_DMA_Callback();
-            LL_ADC_REG_StartConversion(ADC1);
-            converted_degrees = __LL_ADC_CALC_TEMPERATURE(3300, ADC_raw_temp, LL_ADC_RESOLUTION_12B);
+   //         ADC_DMA_Callback();
+   //         LL_ADC_REG_StartConversion(ADC1);
+   //         converted_degrees = __LL_ADC_CALC_TEMPERATURE(3300, ADC_raw_temp, LL_ADC_RESOLUTION_12B);
 #endif
 #ifdef MCU_GDE23
             ADC_DMA_Callback();
@@ -1975,9 +2013,9 @@ if(zero_crosses < 5){
             adc_software_trigger_enable(ADC_REGULAR_CHANNEL);
 #endif
 #ifdef ARTERY
-            ADC_DMA_Callback();
-            adc_ordinary_software_trigger_enable(ADC1, TRUE);
-            converted_degrees = getConvertedDegrees(ADC_raw_temp);
+ //           ADC_DMA_Callback();
+ //           adc_ordinary_software_trigger_enable(ADC1, TRUE);
+//            converted_degrees = getConvertedDegrees(ADC_raw_temp);
 #endif
 #ifdef WCH
             startADCConversion( );

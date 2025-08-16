@@ -47,6 +47,7 @@ void changeCompInput()
         //set comp to medium speed mode
         CMP->ctrlsts  = CMP->ctrlsts | 1<<2;
     }
-	EXINT->polcfg1 = !rising << 21;
-    EXINT->polcfg2 = rising << 21;
+	  
+    EXINT->polcfg1 |= !rising << 21;
+    EXINT->polcfg2 |= rising << 21;
 }

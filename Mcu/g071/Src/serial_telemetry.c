@@ -29,8 +29,8 @@ void telem_UART_Init()
     GPIO_InitStruct.Alternate = LL_GPIO_AF_0;
     LL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-    NVIC_SetPriority(USART1_IRQn, 3);
-    NVIC_EnableIRQ(USART1_IRQn);
+  //  NVIC_SetPriority(USART1_IRQn, 3);
+   // NVIC_EnableIRQ(USART1_IRQn);
 
     LL_DMA_SetPeriphRequest(DMA1, LL_DMA_CHANNEL_3, LL_DMAMUX_REQ_USART1_TX);
 

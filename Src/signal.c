@@ -148,8 +148,8 @@ void transfercomplete()
         } else {
 
             if (dshot == 1) {
-                computeDshotDMA();
                 receiveDshotDma();
+                computeDshotDMA();
             }
             if (servoPwm == 1) {
                 if (getInputPinState()) {

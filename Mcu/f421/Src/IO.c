@@ -17,6 +17,7 @@ char ic_timer_prescaler = CPU_FREQUENCY_MHZ / 7;
 uint32_t dma_buffer[64] = { 0 };
 char out_put = 0;
 uint8_t buffer_padding = 7;
+uint8_t runsetup =0;
 
 void changeToOutput()
 {
@@ -31,12 +32,27 @@ void changeToOutput()
     IC_TIMER_REGISTER->swevt_bit.ovfswtr = TRUE;
 }
 
+
+void setupDshot(){
+    INPUT_DMA_CHANNEL->ctrl |= DMA_DIR_PERIPHERAL_TO_MEMORY;
+    tmr_reset(IC_TIMER_REGISTER);
+    IC_TIMER_REGISTER->cm1 = 0x021;
+    IC_TIMER_REGISTER->cctrl = 0xb;
+    IC_TIMER_REGISTER->div = ic_timer_prescaler;
+    IC_TIMER_REGISTER->pr = 0xFFFF;
+    IC_TIMER_REGISTER->swevt_bit.ovfswtr = TRUE;
+    out_put = 0;
+    IC_TIMER_REGISTER->cval = 0;
+    INPUT_DMA_CHANNEL->paddr = (uint32_t)&IC_TIMER_REGISTER->c1dt;
+    INPUT_DMA_CHANNEL->maddr = (uint32_t)&dma_buffer;
+}
+
 void changeToInput()
 {
     INPUT_DMA_CHANNEL->ctrl |= DMA_DIR_PERIPHERAL_TO_MEMORY;
     tmr_reset(IC_TIMER_REGISTER);
-    IC_TIMER_REGISTER->cm1 = 0x41;
-    IC_TIMER_REGISTER->cctrl = 0xB;
+    IC_TIMER_REGISTER->cm1 = 0x021;
+    IC_TIMER_REGISTER->cctrl = 0xb;
     IC_TIMER_REGISTER->div = ic_timer_prescaler;
     IC_TIMER_REGISTER->pr = 0xFFFF;
     IC_TIMER_REGISTER->swevt_bit.ovfswtr = TRUE;
@@ -44,11 +60,14 @@ void changeToInput()
 }
 void receiveDshotDma()
 {
-    changeToInput();
-    IC_TIMER_REGISTER->cval = 0;
+ //if(armed == 0){
+    //setupDshot();
+  changeToInput();
+//}
     INPUT_DMA_CHANNEL->paddr = (uint32_t)&IC_TIMER_REGISTER->c1dt;
     INPUT_DMA_CHANNEL->maddr = (uint32_t)&dma_buffer;
-    INPUT_DMA_CHANNEL->dtcnt = buffersize;
+IC_TIMER_REGISTER->div = ic_timer_prescaler;
+    INPUT_DMA_CHANNEL->dtcnt = 32;
     IC_TIMER_REGISTER->iden |= TMR_C1_DMA_REQUEST;
     IC_TIMER_REGISTER->ctrl1_bit.tmren = TRUE;
     INPUT_DMA_CHANNEL->ctrl = 0x0000098b;

@@ -49,11 +49,12 @@ extern uint16_t consumed_current;
 uint8_t programming_mode;
 uint16_t position;
 uint8_t  new_byte;
+uint16_t debugBuffer[32] = {0};
 
 void computeDshotDMA()
 {
     dshot_frametime = dma_buffer[31] - dma_buffer[0];
-    halfpulsetime = dshot_frametime >> 5;
+    halfpulsetime = (dshot_frametime >> 5);
     if ((dshot_frametime > dshot_frametime_low) && (dshot_frametime < dshot_frametime_high)) {
 			signaltimeout = 0;
         for (int i = 0; i < 16; i++) {
@@ -241,7 +242,13 @@ void computeDshotDMA()
             dshot_badcounts++;
             programming_mode = 0;
         }
-    }
+
+    }else {
+            dshot_badcounts++;
+            for (int i = 0; i < 32; i++){
+            debugBuffer[i] = dma_buffer[i];
+            }
+        }
 }
 
 void make_dshot_package(uint16_t com_time)

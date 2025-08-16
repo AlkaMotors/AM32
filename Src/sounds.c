@@ -223,6 +223,7 @@ void playInputTune()
 
 void playDefaultTone()
 {
+    beeping = 1;
     SET_AUTO_RELOAD_PWM(TIM1_AUTORELOAD);
     SET_PRESCALER_PWM(50);
     setCaptureCompare();
@@ -235,10 +236,12 @@ void playDefaultTone()
     SET_PRESCALER_PWM(0);
     signaltimeout = 0;
     SET_AUTO_RELOAD_PWM(TIMER1_MAX_ARR);
+    beeping = 0;
 }
 
 void playChangedTone()
 {
+    beeping = 1;
     SET_AUTO_RELOAD_PWM(TIM1_AUTORELOAD);
     SET_PRESCALER_PWM(40);
     setCaptureCompare();
@@ -251,10 +254,12 @@ void playChangedTone()
     SET_PRESCALER_PWM(0);
     signaltimeout = 0;
     SET_AUTO_RELOAD_PWM(TIMER1_MAX_ARR);
+    beeping = 0;
 }
 
 void playBeaconTune3()
 {
+    beeping = 1;
     SET_AUTO_RELOAD_PWM(TIM1_AUTORELOAD);
     setCaptureCompare();
     for (int i = 119; i > 0; i = i - 2) {
@@ -267,4 +272,5 @@ void playBeaconTune3()
     SET_PRESCALER_PWM(0);
     signaltimeout = 0;
     SET_AUTO_RELOAD_PWM(TIMER1_MAX_ARR);
+    beeping = 0;
 }

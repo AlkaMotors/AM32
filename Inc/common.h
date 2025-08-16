@@ -31,7 +31,7 @@ extern int16_t actual_current;
 extern uint16_t e_rpm;
 extern uint32_t average_interval;
 extern uint8_t beeping;
-
+extern uint16_t dshot_badcounts;
 
 #ifdef STMICRO
 extern GPIO_TypeDef* current_GPIO_PORT;

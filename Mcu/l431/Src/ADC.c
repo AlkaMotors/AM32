@@ -89,7 +89,7 @@ void ADC_Init(void)
 
   }
 
-  LL_ADC_EnableIT_OVR(ADC1);
+ // LL_ADC_EnableIT_OVR(ADC1);
 
 
 }

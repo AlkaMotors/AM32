@@ -138,7 +138,7 @@ void ADC_Init(void)
     LL_DMA_SetDataTransferDirection(DMA1, LL_DMA_CHANNEL_2,
         LL_DMA_DIRECTION_PERIPH_TO_MEMORY);
 
-    LL_DMA_SetChannelPriorityLevel(DMA1, LL_DMA_CHANNEL_2, LL_DMA_PRIORITY_HIGH);
+    LL_DMA_SetChannelPriorityLevel(DMA1, LL_DMA_CHANNEL_2, LL_DMA_PRIORITY_LOW);
 
     LL_DMA_SetMode(DMA1, LL_DMA_CHANNEL_2, LL_DMA_MODE_CIRCULAR);
 

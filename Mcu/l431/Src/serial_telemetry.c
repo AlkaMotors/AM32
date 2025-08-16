@@ -75,16 +75,31 @@ void telem_UART_Init()
   LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_4, sizeof(aTxBuffer));
 
   /* (5) Enable DMA transfer complete/error interrupts  */
-  LL_DMA_EnableIT_TC(DMA1, LL_DMA_CHANNEL_4);
-  LL_DMA_EnableIT_TE(DMA1, LL_DMA_CHANNEL_4);
+ // LL_DMA_EnableIT_TC(DMA1, LL_DMA_CHANNEL_4);
+ // LL_DMA_EnableIT_TE(DMA1, LL_DMA_CHANNEL_4);
 }
 
 void send_telem_DMA(uint8_t bytes){   // set data length and enable channel to start transfer
+
 	  LL_USART_SetTransferDirection(USART1, LL_USART_DIRECTION_TX);
-	//  GPIOB->OTYPER &= 0 << 6;
+    LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_4);
 	  LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_4, bytes);
 	  LL_USART_EnableDMAReq_TX(USART1);
 
 	  LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_4);
 	  LL_USART_SetTransferDirection(USART1, LL_USART_DIRECTION_RX);
+}
+
+void setBaudRate(uint32_t baudr){
+if(baudr == 115200){
+USART1->BRR = 0x02B7;
+
+}
+if (baudr == 2000000){
+USART1->BRR = 0x028;
+//LL_USART_Disable(USART1);
+//LL_USART_SetBaudRate(USART1,LL_RCC_USART1_CLKSOURCE_PCLK2,LL_USART_OVERSAMPLING_16,2000000);
+//LL_USART_Enable(USART1);
+
+}
 }

@@ -4,6 +4,7 @@
 #include "kiss_telemetry.h"
 #include "serial_telemetry.h"
 #include "eeprom.h"
+#include "common.h"
 
 volatile uint8_t voltaraDetected = 0;
 

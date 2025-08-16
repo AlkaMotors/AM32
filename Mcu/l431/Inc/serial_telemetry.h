@@ -12,7 +12,7 @@
 
 void telem_UART_Init(void);
 void send_telem_DMA(uint8_t bytes);
-
+void setBaudRate(uint32_t baudr);
 void telem_UART_Init_CH4(void);
 void makeInfoPacket(void);
 

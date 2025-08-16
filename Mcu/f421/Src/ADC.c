@@ -86,7 +86,7 @@ void ADC_Init(void)
     dma_init_struct.peripheral_base_addr = (uint32_t)&ADC1->odt;
     dma_init_struct.peripheral_data_width = DMA_PERIPHERAL_DATA_WIDTH_HALFWORD;
     dma_init_struct.peripheral_inc_enable = FALSE;
-    dma_init_struct.priority = DMA_PRIORITY_HIGH;
+    dma_init_struct.priority = DMA_PRIORITY_LOW;
     dma_init_struct.loop_mode_enable = TRUE;
     dma_init(DMA1_CHANNEL1, &dma_init_struct);
 
@@ -99,7 +99,7 @@ void ADC_Init(void)
 
     adc_base_default_para_init(&adc_base_struct);
     adc_base_struct.sequence_mode = TRUE;
-    adc_base_struct.repeat_mode = TRUE;
+    adc_base_struct.repeat_mode = FALSE;
     adc_base_struct.data_align = ADC_RIGHT_ALIGNMENT;
 #ifdef PA6_NTC_ONLY
     adc_base_struct.ordinary_channel_length = 1;
