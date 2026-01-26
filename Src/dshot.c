@@ -41,6 +41,7 @@ uint32_t gcr[37] = { 0 };
 uint16_t dshot_frametime;
 uint16_t dshot_goodcounts;
 uint16_t dshot_badcounts;
+uint16_t packet_length_badcounts;
 char dshot_extended_telemetry = 0;
 uint16_t send_extended_dshot = 0;
 uint16_t processtime = 0;
@@ -49,15 +50,16 @@ extern uint16_t consumed_current;
 uint8_t programming_mode;
 uint16_t position;
 uint8_t  new_byte;
-uint16_t debugBuffer[32] = {0};
+
+extern uint16_t DMA_start_bit;
 
 void computeDshotDMA()
 {
-    dshot_frametime = dma_buffer[31] - dma_buffer[0];
+    dshot_frametime = dma_buffer[31+DMA_start_bit] - dma_buffer[0+DMA_start_bit];
     halfpulsetime = (dshot_frametime >> 5);
     if ((dshot_frametime > dshot_frametime_low) && (dshot_frametime < dshot_frametime_high)) {
 			signaltimeout = 0;
-        for (int i = 0; i < 16; i++) {
+        for (int i = DMA_start_bit; i < 16; i++) {
             // note that dma_buffer[] is uint32_t, we cast the difference to uint16_t to handle
             // timer wrap correctly
             const uint16_t pdiff = dma_buffer[(i << 1) + 1] - dma_buffer[(i << 1)];
@@ -89,7 +91,8 @@ void computeDshotDMA()
             if (dpulse[11] == 1) {
                 send_telemetry = 1;
             }
-            if(programming_mode > 0){  
+            if(programming_mode > 0){
+                receiveDshotDma();              
                 if(programming_mode == 1){ // begin programming mode
                     position = tocheck;    // eepromBuffer position
                     programming_mode = 2;
@@ -113,6 +116,8 @@ void computeDshotDMA()
                     newinput = tocheck;
                     dshotcommand = 0;
                     command_count = 0;
+                    
+//                    receiveDshotDma();
                     return;
                 }
             }
@@ -150,6 +155,7 @@ void computeDshotDMA()
                 newinput = 0;
                 dshotcommand = 0;
                 command_count = 0;
+                
             }
 
             if ((dshotcommand > 0) && (running == 0)) {
@@ -241,13 +247,19 @@ void computeDshotDMA()
         } else {
             dshot_badcounts++;
             programming_mode = 0;
+       //     GPIOB->scr = GPIO_PINS_7;
+//            for (int i = 0; i < 32; i++){
+//            debugBuffer[i] = dma_buffer[i];
+//            }
+            
+  //          delayMicros(15); // bad crc but packet length in spec, delay for a few us to make sure the incoming packet is done.
         }
-
+ //   receiveDshotDma();
     }else {
-            dshot_badcounts++;
-            for (int i = 0; i < 32; i++){
-            debugBuffer[i] = dma_buffer[i];
-            }
+            packet_length_badcounts++;
+
+  //          delayMicros(30);          // delay one dshot 600 packet length
+  //          receiveDshotDma();         // now start the dma buffer
         }
 }
 

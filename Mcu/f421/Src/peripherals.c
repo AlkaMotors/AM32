@@ -218,10 +218,10 @@ void UN_TIM_Init(void)
     //	RCC_AHBPeriphClockCmd(RCC_AHBPERIPH_DMA1,ENABLE);
 
     crm_periph_clock_enable(CRM_DMA1_PERIPH_CLOCK, TRUE);
-    INPUT_DMA_CHANNEL->ctrl = 0X98a; //  PERIPHERAL HALF WORD, MEMROY WORD ,
+ //   INPUT_DMA_CHANNEL->ctrl = 0X98a; //  PERIPHERAL HALF WORD, MEMROY WORD ,
                                      //  MEMORY INC ENABLE , TC AND ERROR INTS
-    NVIC_SetPriority(IC_DMA_IRQ_NAME, 1);
-    NVIC_EnableIRQ(IC_DMA_IRQ_NAME);
+  //  NVIC_SetPriority(IC_DMA_IRQ_NAME, 1);
+  //  NVIC_EnableIRQ(IC_DMA_IRQ_NAME);
     IC_TIMER_REGISTER->pr = 0xFFFF;
     IC_TIMER_REGISTER->div = 16;
     IC_TIMER_REGISTER->ctrl1_bit.prben = TRUE;
@@ -334,4 +334,5 @@ void enableCorePeripherals()
 #ifdef USE_PULSE_OUT
  gpio_mode_QUICK(GPIOB, GPIO_MODE_OUTPUT, GPIO_PULL_NONE, GPIO_PINS_8);
 #endif
+gpio_mode_QUICK(GPIOB, GPIO_MODE_OUTPUT, GPIO_PULL_NONE, GPIO_PINS_7);
 }

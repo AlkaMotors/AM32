@@ -23,6 +23,7 @@ void setInputPullDown();
 void setInputPullUp();
 void enableHalfTransferInt();
 void setInputPullNone();
+void runDshotCheck();
 
 extern char inputSet;
 extern char dshot;

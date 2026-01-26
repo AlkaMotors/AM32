@@ -32,6 +32,9 @@ extern uint16_t e_rpm;
 extern uint32_t average_interval;
 extern uint8_t beeping;
 extern uint16_t dshot_badcounts;
+extern uint16_t dshot_frametime;
+extern uint16_t DMA_start_bit;
+extern uint16_t valid_packet_high;
 
 #ifdef STMICRO
 extern GPIO_TypeDef* current_GPIO_PORT;

@@ -12,12 +12,43 @@
 #include "functions.h"
 #include "serial_telemetry.h"
 #include "targets.h"
+#include "signal.h"
 
 char ic_timer_prescaler = CPU_FREQUENCY_MHZ / 7;
 uint32_t dma_buffer[64] = { 0 };
 char out_put = 0;
 uint8_t buffer_padding = 7;
 uint8_t runsetup =0;
+extern void processDshot(void);
+
+void runDshotCheck(){
+    if(INPUT_DMA_CHANNEL->dtcnt < 63){
+      if(armed){
+        if ((IC_TIMER_REGISTER->cval - dma_buffer[63-INPUT_DMA_CHANNEL->dtcnt]) > (valid_packet_high<<1)){
+          if(INPUT_DMA_CHANNEL->dtcnt <= 32){
+            DMA_start_bit = 32-INPUT_DMA_CHANNEL->dtcnt;
+            transfercomplete();
+            EXINT->swtrg = EXINT_LINE_15;
+          }
+        INPUT_DMA_CHANNEL->ctrl_bit.chen = FALSE;
+        INPUT_DMA_CHANNEL->dtcnt = 64;
+        INPUT_DMA_CHANNEL->ctrl_bit.chen = TRUE;
+        IC_TIMER_REGISTER->cval = 0;
+        DMA_start_bit = 0;
+        }
+    }else{
+      if(INPUT_DMA_CHANNEL->dtcnt <= 32){
+      transfercomplete();
+      processDshot();
+      INPUT_DMA_CHANNEL->ctrl_bit.chen = FALSE;
+      INPUT_DMA_CHANNEL->dtcnt = 64;
+      INPUT_DMA_CHANNEL->ctrl_bit.chen = TRUE;
+      IC_TIMER_REGISTER->cval = 0;
+      }
+    }
+    }
+}
+
 
 void changeToOutput()
 {
@@ -66,11 +97,12 @@ void receiveDshotDma()
 //}
     INPUT_DMA_CHANNEL->paddr = (uint32_t)&IC_TIMER_REGISTER->c1dt;
     INPUT_DMA_CHANNEL->maddr = (uint32_t)&dma_buffer;
-IC_TIMER_REGISTER->div = ic_timer_prescaler;
-    INPUT_DMA_CHANNEL->dtcnt = 32;
+    IC_TIMER_REGISTER->div = ic_timer_prescaler;
+    INPUT_DMA_CHANNEL->dtcnt = 64;
     IC_TIMER_REGISTER->iden |= TMR_C1_DMA_REQUEST;
     IC_TIMER_REGISTER->ctrl1_bit.tmren = TRUE;
-    INPUT_DMA_CHANNEL->ctrl = 0x0000098b;
+ //   INPUT_DMA_CHANNEL->ctrl = 0x0000098b;
+    INPUT_DMA_CHANNEL->ctrl = 0x00000989;  // 
 }
 
 void sendDshotDma()

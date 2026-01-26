@@ -12,13 +12,47 @@
 #include "functions.h"
 #include "serial_telemetry.h"
 #include "targets.h"
+#include "signal.h"
 
 char ic_timer_prescaler = CPU_FREQUENCY_MHZ / 5 - 2;
 uint32_t dma_buffer[64] = { 0 };
 char out_put = 0;
 uint8_t buffer_padding = 0;
-uint8_t buffer_size = 32;
+uint8_t buffer_size = 64;
 uint16_t change_time = 0;
+extern void processDshot(void);
+
+void runDshotCheck(){
+     if((DMA_CHCNT(INPUT_DMA_CHANNEL)) < 63){
+      if(armed){
+        if ((TIMER_CNT(IC_TIMER_REGISTER) - dma_buffer[63-DMA_CHCNT(INPUT_DMA_CHANNEL)]) > (valid_packet_high<<1)){
+          if(DMA_CHCNT(INPUT_DMA_CHANNEL) <= 32){
+            DMA_start_bit = 32-DMA_CHCNT(INPUT_DMA_CHANNEL);
+            transfercomplete();
+            EXTI_SWIEV |= (uint32_t)EXTI_15;
+          }
+        
+        dma_channel_disable(INPUT_DMA_CHANNEL);
+        DMA_CHCNT(INPUT_DMA_CHANNEL) = 64;
+        dma_channel_enable(INPUT_DMA_CHANNEL);
+        TIMER_CNT(IC_TIMER_REGISTER) = 0;
+        DMA_start_bit = 0;
+        }
+
+    }else{
+      if(DMA_CHCNT(INPUT_DMA_CHANNEL) <= 32){
+      transfercomplete();
+      processDshot();
+ //     EXTI_SWIEV |= (uint32_t)EXTI_15;
+        dma_channel_disable(INPUT_DMA_CHANNEL);
+        DMA_CHCNT(INPUT_DMA_CHANNEL) = 64;
+        dma_channel_enable(INPUT_DMA_CHANNEL);
+        TIMER_CNT(IC_TIMER_REGISTER) = 0;
+      }
+    }
+    } 
+  
+}
 
 void receiveDshotDma()
 {
@@ -55,7 +89,7 @@ void sendDshotDma()
     TIMER_SWEVG(IC_TIMER_REGISTER) |= (uint32_t)TIMER_EVENT_SRC_UPG;
     DMA_CHMADDR(INPUT_DMA_CHANNEL) = (uint32_t)&gcr;
     DMA_CHCNT(INPUT_DMA_CHANNEL) = ((23 + buffer_padding) & DMA_CHANNEL_CNT_MASK);
-    DMA_CHCTL(INPUT_DMA_CHANNEL) = 0x0000099b;
+    DMA_CHCTL(INPUT_DMA_CHANNEL) = 0x00000989;
     TIMER_DMAINTEN(IC_TIMER_REGISTER) |= (uint32_t)TIMER_DMA_CH0D;
     TIMER_CHCTL2(IC_TIMER_REGISTER) |= (uint32_t)TIMER_CCX_ENABLE;
     TIMER_CCHP(IC_TIMER_REGISTER) |= (uint32_t)TIMER_CCHP_POEN;

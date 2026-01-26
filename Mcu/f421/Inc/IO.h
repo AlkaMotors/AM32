@@ -16,6 +16,7 @@ void changeToOutput();
 void changeToInput();
 void receiveDshotDma();
 void sendDshotDma();
+void runDshotCheck();
 
 uint8_t getInputPinState();
 void setInputPolarityRising();

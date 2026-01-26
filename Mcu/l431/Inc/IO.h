@@ -23,6 +23,7 @@ void setInputPullDown();
 void setInputPullUp();
 void enableHalfTransferInt();
 void setInputPullNone();
+void runDshotCheck();
 
 extern char send_telemetry;
 extern uint8_t degrees_celsius;

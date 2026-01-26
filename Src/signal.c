@@ -117,17 +117,21 @@ void computeServoInput()
 
 void transfercomplete()
 {
-    if (armed && dshot_telemetry) {
-        if (out_put) {
-            receiveDshotDma();
-            compute_dshot_flag = 2;
-            return;
-        } else {
-            sendDshotDma();
-            compute_dshot_flag = 1;
-            return;
-        }
+    if (armed && dshot) {   // no bidir neeeded for ultra send flag to process input
+            compute_dshot_flag = 1;  
+            return;            // do not call receive dma until packet has been parsed. 
     }
+//    if (armed && dshot_telemetry) {
+//        if (out_put) {
+//            receiveDshotDma();
+//            compute_dshot_flag = 2;
+//            return;
+//        } else {
+//            sendDshotDma();
+//            compute_dshot_flag = 1;
+//            return;
+//        }
+//    }
     if (inputSet == 0) {
         detectInput();
         receiveDshotDma();
@@ -148,7 +152,7 @@ void transfercomplete()
         } else {
 
             if (dshot == 1) {
-                receiveDshotDma();
+               // receiveDshotDma();         // set in dshot compute routine.
                 computeDshotDMA();
             }
             if (servoPwm == 1) {
@@ -164,7 +168,7 @@ void transfercomplete()
         if (!armed) {
             if (dshot && (average_count < 8) && (zero_input_count > 5)) {
                 average_count++;
-                average_packet_length = average_packet_length + (dma_buffer[31] - dma_buffer[0]);
+                average_packet_length = average_packet_length + (uint16_t)(dma_buffer[31] - dma_buffer[0]);
                 if (average_count == 8) {
                     dshot_frametime_high = (average_packet_length >> 3) + (average_packet_length >> 7);
                     dshot_frametime_low = (average_packet_length >> 3) - (average_packet_length >> 7);

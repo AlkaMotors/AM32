@@ -249,6 +249,7 @@ an settings option)
 #include <version.h>
 
 void zcfoundroutine(void);
+void processDshot(void);
 
 // firmware build options !! fixed speed and duty cycle modes are not to be used
 // with sinusoidal startup !!
@@ -302,6 +303,13 @@ fastPID stallPid = { // 1khz loop time
     .output_limit = 50000
 };
 
+uint16_t debugBuffer[32] = {0};
+uint16_t valid_packet_high;
+uint16_t valid_packet_low;
+uint16_t thispacket;
+uint16_t DMA_start_bit;
+uint16_t valid_count;
+uint16_t debugdatacount;
 
 uint8_t newPacketReceived;
 EEprom_t eepromBuffer;
@@ -1223,9 +1231,17 @@ if (!stepper_sine && armed) {
 }  //beeping
 }
 
-void tenKhzRoutine()
-{ // 20khz as of 2.00 to be renamed
-    
+int bit_max = 100;
+
+void tenKhzRoutine(){
+  
+ // 20khz as of 2.00 to be renamed
+ valid_packet_high = (dshot_frametime_high >> 4); // frametime by 16
+ valid_packet_low = (dshot_frametime_low >> 4); 
+
+   runDshotCheck();
+  
+  
     duty_cycle = duty_cycle_setpoint;
     tenkhzcounter++;
     ledcounter++;
@@ -1238,6 +1254,7 @@ void tenKhzRoutine()
                     if (armed_timeout_count > LOOP_FREQUENCY_HZ) { // one second
                         if (zero_input_count > 30) {
                             armed = 1;
+                          
 #ifdef USE_LED_STRIP
                             //	send_LED_RGB(0,0,0);
                             delayMicros(1000);
@@ -1260,13 +1277,14 @@ void tenKhzRoutine()
 															play_tone_flag = 4;
 #else
 															playInputTune();
-#endif
+#endif                        
+
                             }
                             if (!servoPwm) {
                                 eepromBuffer.rc_car_reverse = 0;
                             }
                         } else {
-                            inputSet = 0;
+//                          inputSet = 0;
                             armed_timeout_count = 0;
                         }
                     }
@@ -1312,6 +1330,8 @@ if(!beeping){
         }
 #endif
         if (one_khz_loop_counter > PID_LOOP_DIVIDER) { // 1khz PID loop
+//            gpio_mode_QUICK(GPIOB, GPIO_MODE_OUTPUT, GPIO_PULL_NONE, GPIO_PINS_7);
+ //           GPIOB->scr = GPIO_PINS_7;
             one_khz_loop_counter = 0;
             if (play_tone_flag != 0) {
                 switch (play_tone_flag) {
@@ -1448,10 +1468,12 @@ if(!beeping){
     }
 
 #else
-  signaltimeout++;
+signaltimeout++;
 
 #endif
 }
+//GPIOB->clr = GPIO_PINS_7;
+//gpio_mode_QUICK(GPIOB, GPIO_MODE_INPUT, GPIO_PULL_NONE, GPIO_PINS_7);
 
 }
 
@@ -1977,11 +1999,11 @@ if(zero_crosses < 5){
 
 #if !defined(MCU_G031) && !defined(NEED_INPUT_READY)
         if (dshot_telemetry && (commutation_interval > DSHOT_PRIORITY_THRESHOLD)) {
-             NVIC_SetPriority(IC_DMA_IRQ_NAME, 0);
+        //     NVIC_SetPriority(IC_DMA_IRQ_NAME, 0);
              NVIC_SetPriority(COM_TIMER_IRQ, 1);
              NVIC_SetPriority(COMPARATOR_IRQ, 1);
          } else {
-             NVIC_SetPriority(IC_DMA_IRQ_NAME, 1);
+        //     NVIC_SetPriority(IC_DMA_IRQ_NAME, 1);
              NVIC_SetPriority(COM_TIMER_IRQ, 0);
              NVIC_SetPriority(COMPARATOR_IRQ, 0);
          }

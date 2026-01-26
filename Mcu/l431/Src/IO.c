@@ -12,11 +12,55 @@
 #include "functions.h"
 #include "serial_telemetry.h"
 #include "targets.h"
+#include "signal.h"
 
 char ic_timer_prescaler = (CPU_FREQUENCY_MHZ / 4);
 uint32_t dma_buffer[64] = { 0 };
 char out_put = 0;
 uint8_t buffer_padding = 0;
+extern void processDshot(void);
+
+#ifdef USE_TIMER_3_CHANNEL_1
+#define Input_DMA_Ch  DMA1_Channel4
+#endif
+#ifdef USE_TIMER_15_CHANNEL_1  
+#define Input_DMA_Ch  DMA1_Channel5
+#endif
+
+
+void runDshotCheck(){ 
+     if((Input_DMA_Ch->CNDTR) < 63){
+      if(armed){
+        if ((IC_TIMER_REGISTER->CNT - dma_buffer[63-Input_DMA_Ch->CNDTR]) > (valid_packet_high<<1)){
+          if(Input_DMA_Ch->CNDTR <= 32){
+            DMA_start_bit = 32-Input_DMA_Ch->CNDTR;
+            transfercomplete();
+            EXTI->SWIER1 |= LL_EXTI_LINE_15;
+          }
+        
+        LL_DMA_DisableChannel(DMA1, INPUT_DMA_CHANNEL);
+        Input_DMA_Ch->CNDTR = 64;
+        LL_DMA_EnableChannel(DMA1, INPUT_DMA_CHANNEL);
+        IC_TIMER_REGISTER->CNT = 0;
+        DMA_start_bit = 0;
+        }
+
+    }else{
+      if(Input_DMA_Ch->CNDTR <= 32){
+      transfercomplete();
+      processDshot();
+ //     EXINT->swtrg = EXINT_LINE_15;
+        LL_DMA_DisableChannel(DMA1, INPUT_DMA_CHANNEL);
+        Input_DMA_Ch->CNDTR = 64;
+        LL_DMA_EnableChannel(DMA1, INPUT_DMA_CHANNEL);
+        IC_TIMER_REGISTER->CNT = 0;
+      }
+    }
+    } 
+  
+}
+
+
 
 void receiveDshotDma()
 {
@@ -40,13 +84,13 @@ void receiveDshotDma()
     DMA1_Channel4->CMAR = (uint32_t)&dma_buffer;
     DMA1_Channel4->CPAR = (uint32_t)&IC_TIMER_REGISTER->CCR1;
     DMA1_Channel4->CNDTR = buffersize;
-    DMA1_Channel4->CCR = 0x98b;
+    DMA1_Channel4->CCR = 0x989;
 #endif
 #ifdef USE_TIMER_15_CHANNEL_1
     DMA1_Channel5->CMAR = (uint32_t)&dma_buffer;
     DMA1_Channel5->CPAR = (uint32_t)&IC_TIMER_REGISTER->CCR1;
     DMA1_Channel5->CNDTR = buffersize;
-    DMA1_Channel5->CCR = 0x98b;
+    DMA1_Channel5->CCR = 0x989;
 #endif
     IC_TIMER_REGISTER->DIER |= TIM_DIER_CC1DE;
     IC_TIMER_REGISTER->CCER |= IC_TIMER_CHANNEL;
