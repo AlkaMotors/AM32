@@ -13,9 +13,6 @@
 void computeDshotDMA(void);
 void make_dshot_package(uint16_t com_time);
 
-extern void playInputTune(void);
-extern void playInputTune2(void);
-extern void playBeaconTune3(void);
 extern void saveEEpromSettings(void);
 
 extern char dshot_telemetry;

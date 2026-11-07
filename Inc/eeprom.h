@@ -14,7 +14,7 @@ typedef union EEprom_u {
         char firmware_name[12]; //5-16
         uint8_t dir_reversed; // 17
         uint8_t bi_direction; // 18
-        uint8_t use_sine_start; // 19
+        uint8_t use_sine_start; // 19: 0 off, 1 continuous, 2 timed one-shot
         uint8_t comp_pwm; // 20
         uint8_t variable_pwm; // 21
         uint8_t stuck_rotor_protection; // 22
@@ -57,8 +57,9 @@ typedef union EEprom_u {
             uint8_t filter_hz; // 181
             uint8_t debug_rate; // 182
             uint8_t term_enable; // 183
-            uint8_t reserved[8]; // 184-191
         } can;
+        uint8_t demag_comp; // 184: 0 off, 1 coast only, 2/3/4 recovery cuts
+        uint8_t reserved_demag[7]; // 185-191
     };
     uint8_t buffer[192];
 } EEprom_t;

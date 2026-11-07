@@ -408,7 +408,7 @@ char fast_accel = 1;
 char fast_deccel = 0;
 uint16_t last_duty_cycle = 0;
 uint16_t duty_cycle_setpoint = 0;
-char play_tone_flag = 0;
+
 
 typedef enum { GPIO_PIN_RESET = 0U,
     GPIO_PIN_SET } GPIO_PinState;
@@ -540,10 +540,74 @@ uint8_t dshotcommand;
 uint16_t armed_count_threshold = 1000;
 
 char armed = 0;
+
+
+// demag protection: COM_TIMER is armed as a zero cross watchdog after each commutation
+#define DEMAG_NONE 0
+#define DEMAG_COASTING 1      // one blind step taken, all phases off while waiting for zero cross
+#define DEMAG_RECOVERY_START 2 // zero cross found while coasting, commutating at 30 degrees
+#define DEMAG_RECOVERY_STEP 3  // first step after recovery, reduced power and 30 degree timing
+volatile uint8_t demag_watch = 0; // set when the pending COM_TIMER interrupt is the watchdog
+volatile uint8_t demag_state = DEMAG_NONE;
+uint8_t demag_cut_shift = 16; // power cut is duty >> shift, set from eepromBuffer.demag_comp
+#define SINE_START_ONCE 2
+#define SINE_START_TICKS ((3U * LOOP_FREQUENCY_HZ) / 2U)
+// Speed is inverse step delay: divide the old delays by 1.3.
+#define SINE_START_SLOW_DELAY (70000U / (13U * eepromBuffer.motor_poles))
+// Another 20% at the high endpoint: 810 / (1.3 * 1.2) = 6750 / 13.
+#define SINE_START_FAST_DELAY (6750U / (13U * eepromBuffer.motor_poles))
+static volatile uint16_t sine_idle_input = 0;
+static volatile uint8_t sine_exit_requested = 0;
+static volatile uint16_t sine_exit_delay = 0;
+static volatile uint32_t sine_start_ticks = 0;
+volatile uint32_t sine_zero_ticks = 0;
+volatile uint8_t sine_dshot_zero = 0;
+// 0: ready, 1: ramping, 2: consumed until disarm or one second at DShot zero.
+static volatile uint8_t sine_start_state = 0;
+static volatile uint8_t sine_turtle_override = 0;
+
+// DShot temporary reverse persists until the normal-direction command arrives.
+// In particular, zero throttle and ESC disarming must not clear this override.
+void setSineTurtleOverride(uint8_t enabled)
+{
+    if (sine_turtle_override == enabled) {
+        return;
+    }
+    sine_turtle_override = enabled;
+    if (eepromBuffer.use_sine_start == SINE_START_ONCE) {
+        sine_start_ticks = 0;
+        sine_zero_ticks = 0;
+        sine_start_state = enabled ? 2 : 0;
+        if (stepper_sine) {
+            DISABLE_COM_TIMER_INT();
+            maskPhaseInterrupts();
+            SET_DUTY_CYCLE_ALL(0);
+            allOff();
+            stepper_sine = 0;
+            running = 0;
+            duty_cycle_setpoint = 0;
+            do_once_sinemode = 1;
+        }
+    }
+}
+
+static uint8_t sineStartEnabled(void)
+{
+    return eepromBuffer.use_sine_start == 1
+        || (eepromBuffer.use_sine_start == SINE_START_ONCE && !sine_turtle_override && sine_start_state != 2);
+}
 uint16_t zero_input_count = 0;
 
 uint16_t input = 0;
 uint16_t newinput = 0;
+
+uint8_t motorOperationActive(void)
+{
+    // Sine startup rotates the motor before running becomes true.
+    // Include pending throttle so a beep cannot race the first motor command.
+    return running || (armed && (input > 47 || newinput > 47
+                                 || sine_start_state == 1));
+}
 char inputSet = 0;
 char dshot = 0;
 char servoPwm = 0;
@@ -597,7 +661,14 @@ int32_t doPidCalculations(struct fastPID* pidnow, int actual, int target)
 
 void loadEEpromSettings()
 {
+    
     read_flash_bin(eepromBuffer.buffer, eeprom_address, sizeof(eepromBuffer.buffer));
+  
+    eepromBuffer.demag_comp = 1; 
+    if (eepromBuffer.demag_comp > 4) {
+        eepromBuffer.demag_comp = 0;
+    }
+    demag_cut_shift = eepromBuffer.demag_comp > 1 ? 7 - eepromBuffer.demag_comp : 16;
 
     if (eepromBuffer.advance_level > 3) {
         eepromBuffer.advance_level = 2;
@@ -707,7 +778,7 @@ void loadEEpromSettings()
         if (eepromBuffer.limits.current > 0 && eepromBuffer.limits.current < 100) {
             use_current_limit = 1;
         }
-        
+
         if (eepromBuffer.sine_mode_power == 0 || eepromBuffer.sine_mode_power > 10) {
             eepromBuffer.sine_mode_power = 5;
         }
@@ -748,6 +819,9 @@ void loadEEpromSettings()
         high_rpm_level = motor_kv / 12 / (32 / eepromBuffer.motor_poles);				
     }
     reverse_speed_threshold = map(motor_kv, 300, 3000, 1000, 500);
+
+    eepromBuffer.use_sine_start = 2;
+    eepromBuffer.sine_mode_power = 4;
 }
 
 void saveEEpromSettings()
@@ -826,7 +900,7 @@ void commutate()
         rising = !(step % 2);
     }
     __disable_irq(); // don't let dshot interrupt
-    if (!prop_brake_active) {
+    if (!prop_brake_active && demag_state != DEMAG_COASTING) {
         comStep(step);
     }
     __enable_irq();
@@ -852,15 +926,57 @@ void commutate()
 void PeriodElapsedCallback()
 {
     DISABLE_COM_TIMER_INT(); // disable interrupt
+    if (beeping) {
+        demag_watch = 0;
+        demag_state = DEMAG_NONE;
+        return; // a previously pending interrupt must not commutate a tone
+    }
+    if (demag_watch) { // watchdog expired, no zero cross by the expected commutation time
+        demag_watch = 0;
+        if (running && !old_routine) {
+            maskPhaseInterrupts();
+            allOff();
+            demag_state = DEMAG_COASTING;
+            commutate(); // advance once without power and watch the next phase
+            enableCompInterrupts();
+        } else {
+            demag_state = DEMAG_NONE;
+        }
+        return; // stay coasting until a zero cross; do not arm another blind step
+    }
+    if (demag_state == DEMAG_RECOVERY_START) { // set reduced power before the next step is energized
+        demag_state = DEMAG_RECOVERY_STEP;
+        SET_DUTY_CYCLE_ALL(adjusted_duty_cycle - (adjusted_duty_cycle >> demag_cut_shift));
+    } else if (demag_state == DEMAG_RECOVERY_STEP) {
+        demag_state = DEMAG_NONE;
+        SET_DUTY_CYCLE_ALL(adjusted_duty_cycle);
+    }
     commutate();
     commutation_interval = ((commutation_interval)+((lastzctime + thiszctime) >> 1))>>1;
-  	if (!eepromBuffer.auto_advance) {
-	  advance = (commutation_interval >> 3) * temp_advance; // 60 divde 8 7.5 degree increments
+    if (demag_state == DEMAG_RECOVERY_STEP) {
+      advance = commutation_interval >> 1; // 30 degrees
+    } else if (!eepromBuffer.auto_advance) {
+	  advance = (commutation_interval >> 3) * temp_advance; // preserve existing advance-level scale
 	} else {
 	  advance = (commutation_interval * auto_advance_level) >> 6; // 60 divde 64 0.9375 degree increments
     }
     waitTime = (commutation_interval >> 1) - advance;
     if (!old_routine) {
+        if (eepromBuffer.demag_comp) {
+            // Allow 2 intervals during recovery, otherwise 1.25; a zero cross re-arms COM_TIMER first.
+            uint32_t timeout;
+            if (demag_state == DEMAG_RECOVERY_STEP) {
+                timeout = commutation_interval * 2;
+            } else {
+                timeout = commutation_interval + (commutation_interval >> 2);
+            }
+            demag_watch = 1;
+            if (timeout > 0xFFFF) {
+                SET_AND_ENABLE_COM_INT(0xFFFF);
+            } else {
+                SET_AND_ENABLE_COM_INT(timeout);
+            }
+        }
         enableCompInterrupts(); // enable comp interrupt
     }
     if (zero_crosses < 10000) {
@@ -870,6 +986,10 @@ void PeriodElapsedCallback()
 
 void interruptRoutine()
 {
+    if (beeping) {
+        maskPhaseInterrupts();
+        return;
+    }
    if (average_interval > 125) {
         if ((INTERVAL_TIMER_COUNT < 125) && (duty_cycle < 600) && (zero_crosses < 500)) { // should be impossible, desync?exit anyway
            return;
@@ -894,14 +1014,23 @@ void interruptRoutine()
     __disable_irq();
     maskPhaseInterrupts();
     lastzctime = thiszctime;
-    thiszctime = INTERVAL_TIMER_COUNT;  
+    thiszctime = INTERVAL_TIMER_COUNT;
     SET_INTERVAL_TIMER_COUNT(0);
-    SET_AND_ENABLE_COM_INT(waitTime+1); // enable COM_TIMER interrupt
+    demag_watch = 0;
+    if (demag_state == DEMAG_COASTING) { // zero cross found while coasting, commutate now at 30 degrees
+        thiszctime >>= 1; // one missed crossing: measured span covers two sectors
+        demag_state = DEMAG_RECOVERY_START;
+        SET_AND_ENABLE_COM_INT(1);
+    } else {
+        SET_AND_ENABLE_COM_INT(waitTime+1); // enable COM_TIMER interrupt
+    }
     __enable_irq();
 }
 
 void startMotor()
 {
+    demag_watch = 0;
+    demag_state = DEMAG_NONE;
     if (running == 0) {
         commutate();
         commutation_interval = 10000;
@@ -913,7 +1042,6 @@ void startMotor()
 
 void setInput()
 {
-if (!beeping){
     if (eepromBuffer.bi_direction) {
         if (dshot == 0) {
             if (eepromBuffer.rc_car_reverse) {
@@ -1045,7 +1173,7 @@ if (!beeping){
 #ifdef FIXED_DUTY_MODE
         input = FIXED_DUTY_MODE_POWER * 20 + 47;
 #else
-        if (eepromBuffer.use_sine_start) {
+        if (eepromBuffer.use_sine_start == 1) {
             if (adjusted_input < 30) { // dead band ?
                 input = 0;
             }
@@ -1092,9 +1220,47 @@ if (!beeping){
 #endif
     }
 #endif
+    if (input > 47) {
+        cancelRuntimeTone();
+    } else if (beeping) {
+        return; // Keep tone output only while throttle remains stopped.
+    }
 #ifndef BRUSHED_MODE
+    if (eepromBuffer.use_sine_start == SINE_START_ONCE && !sine_turtle_override && armed
+        && sine_start_state != 2) {
+        if (input > 47) {
+            if (sine_start_state == 0) {
+                demag_watch = 0;
+                demag_state = DEMAG_NONE;
+                sine_start_ticks = 0;
+                sine_idle_input = newinput;
+                sine_exit_requested = 0;
+                step_delay = SINE_START_SLOW_DELAY;
+                // A tone can skip the idle phase initialization. Establish all
+                // three sine positions explicitly for every timed startup.
+                phase_A_position = (((step - 1) * 60) + enter_sine_angle) % 360;
+                phase_B_position = (phase_A_position + 119) % 360;
+                phase_C_position = (phase_A_position + 239) % 360;
+                prop_brake_active = 0;
+                stepper_sine = 1;
+                do_once_sinemode = 1;
+                sine_start_state = 1;
+            } else if (dshot && newinput > 47
+                       && newinput != sine_idle_input && !sine_exit_requested) {
+                // Freeze the last sine speed, even if throttle returns to idle.
+                sine_exit_delay = step_delay;
+                sine_exit_requested = 1;
+            }
+        } else if (sine_start_state == 1) {
+            sine_start_state = 2;
+            stepper_sine = 0;
+            running = 0;
+            SET_DUTY_CYCLE_ALL(0);
+            allOff();
+        }
+    }
 if (!stepper_sine && armed) {
-        if (input >= 47 + (80 * eepromBuffer.use_sine_start)) {
+        if (input >= 47 + (80 * sineStartEnabled())) {
             if (running == 0) {
                 allOff();
                 if (!old_routine) {
@@ -1104,7 +1270,7 @@ if (!stepper_sine && armed) {
                 last_duty_cycle = min_startup_duty;
             }
 
-            if (eepromBuffer.use_sine_start) {
+            if (eepromBuffer.use_sine_start == 1) {
                 duty_cycle_setpoint = map(input, 137, 2047, minimum_duty_cycle+40, 2000);
             } else {
                 duty_cycle_setpoint = map(input, 47, 2047, minimum_duty_cycle, 2000);
@@ -1115,92 +1281,76 @@ if (!stepper_sine && armed) {
             }
         }
 
-        if (input < 47 + (80 * eepromBuffer.use_sine_start)) {
-//            if (play_tone_flag != 0) {
-//                switch (play_tone_flag) {
-//									
-//                case 1:
-//                    playDefaultTone();
-//                    break;
-//                case 2:
-//                    playChangedTone();
-//                    break;
-//                case 3:
-//                    playBeaconTune3();
-//                    break;
-//                case 4:
-//                    playInputTune2();
-//                    break;
-//                case 5:
-//                    playDefaultTone();
-//                    break;
-//                }
-//                play_tone_flag = 0;
-//            }
-
-            if (!eepromBuffer.comp_pwm) {
-                duty_cycle_setpoint = 0;
-                if (!running) {
-                    old_routine = 1;
-                    zero_crosses = 0;
-                    if (eepromBuffer.brake_on_stop) {
-                        fullBrake();
-                    } else {
-                        if (!prop_brake_active) {
+        if (input < 47 + (80 * sineStartEnabled())) {
+            uint32_t idle_irq_mask = lockMotorOutputs();
+            // A beep or throttle packet may have preempted the outer check.
+            if (!beeping && input < 47 + (80 * sineStartEnabled())) {
+    
+                if (!eepromBuffer.comp_pwm) {
+                    duty_cycle_setpoint = 0;
+                    if (!running) {
+                        old_routine = 1;
+                        zero_crosses = 0;
+                        if (eepromBuffer.brake_on_stop) {
+                            fullBrake();
+                        } else {
+                            if (!prop_brake_active) {
+                                allOff();
+                            }
+                        }
+                    }
+                    if (eepromBuffer.rc_car_reverse && prop_brake_active) {
+#ifndef PWM_ENABLE_BRIDGE
+                        prop_brake_duty_cycle = (getAbsDif(1000, newinput) + 1000);
+                        if (prop_brake_duty_cycle >= (TIMER1_MAX_ARR - 1)) {
+                            fullBrake();
+                        } else {
+                            proportionalBrake();
+                        }
+#endif
+                    }
+                } else {
+                    if (!running) {
+    
+                        old_routine = 1;
+                        zero_crosses = 0;
+                        bad_count = 0;
+                        if (eepromBuffer.brake_on_stop) {
+                            if (!sineStartEnabled()) {
+#ifndef PWM_ENABLE_BRIDGE
+                                prop_brake_duty_cycle = (1980) + eepromBuffer.drag_brake_strength * 2;
+                                proportionalBrake();
+                                prop_brake_active = 1;
+#else
+                                // todo add proportional braking for pwm/enable style bridge.
+#endif
+                            }
+                        } else {
                             allOff();
                         }
+                        duty_cycle_setpoint = 0;
                     }
-                }
-                if (eepromBuffer.rc_car_reverse && prop_brake_active) {
-#ifndef PWM_ENABLE_BRIDGE
-                    prop_brake_duty_cycle = (getAbsDif(1000, newinput) + 1000);
-                    if (prop_brake_duty_cycle >= (TIMER1_MAX_ARR - 1)) {
-                        fullBrake();
-                    } else {
-                        proportionalBrake();
+    
+                    phase_A_position = ((step - 1) * 60) + enter_sine_angle;
+                    if (phase_A_position > 359) {
+                        phase_A_position -= 360;
                     }
-#endif
-                }
-            } else {
-                if (!running) {
-
-                    old_routine = 1;
-                    zero_crosses = 0;
-                    bad_count = 0;
-                    if (eepromBuffer.brake_on_stop) {
-                        if (!eepromBuffer.use_sine_start) {
-#ifndef PWM_ENABLE_BRIDGE
-                            prop_brake_duty_cycle = (1980) + eepromBuffer.drag_brake_strength * 2;
-                            proportionalBrake();
-                            prop_brake_active = 1;
-#else
-                            // todo add proportional braking for pwm/enable style bridge.
-#endif
-                        }
-                    } else {
-                        allOff();
+                    phase_B_position = phase_A_position + 119;
+                    if (phase_B_position > 359) {
+                        phase_B_position -= 360;
+                    }
+                    phase_C_position = phase_A_position + 239;
+                    if (phase_C_position > 359) {
+                        phase_C_position -= 360;
+                    }
+    
+                    if (sineStartEnabled()) {
+                        stepper_sine = 1;
                     }
                     duty_cycle_setpoint = 0;
                 }
-
-                phase_A_position = ((step - 1) * 60) + enter_sine_angle;
-                if (phase_A_position > 359) {
-                    phase_A_position -= 360;
-                }
-                phase_B_position = phase_A_position + 119;
-                if (phase_B_position > 359) {
-                    phase_B_position -= 360;
-                }
-                phase_C_position = phase_A_position + 239;
-                if (phase_C_position > 359) {
-                    phase_C_position -= 360;
-                }
-
-                if (eepromBuffer.use_sine_start == 1) {
-                    stepper_sine = 1;
-                }
-                duty_cycle_setpoint = 0;
             }
+            unlockMotorOutputs(idle_irq_mask);
         }
         if (!prop_brake_active) {
             if (input >= 47 && (zero_crosses < (uint32_t)(30 >> eepromBuffer.stall_protection))) {
@@ -1228,21 +1378,40 @@ if (!stepper_sine && armed) {
         }
     }
 #endif
-}  //beeping
 }
 
 int bit_max = 100;
 
 void tenKhzRoutine(){
-  
+
  // 20khz as of 2.00 to be renamed
  valid_packet_high = (dshot_frametime_high >> 4); // frametime by 16
  valid_packet_low = (dshot_frametime_low >> 4); 
 
    runDshotCheck();
-  
-  
+
+
     duty_cycle = duty_cycle_setpoint;
+    if (!armed) {
+        sine_start_state = 0;
+        sine_start_ticks = 0;
+        sine_zero_ticks = 0;
+    } else {
+        if (sine_start_state == 1 && sine_start_ticks < SINE_START_TICKS) {
+            sine_start_ticks++;
+        }
+        if (!sine_turtle_override && dshot && sine_dshot_zero && newinput == 0 && signaltimeout < (LOOP_FREQUENCY_HZ >> 1)) {
+            if (sine_zero_ticks < LOOP_FREQUENCY_HZ>>1) {
+                sine_zero_ticks++;
+            }
+            if (sine_zero_ticks >= LOOP_FREQUENCY_HZ>>1) {
+                sine_start_state = 0;
+                sine_start_ticks = 0;
+            }
+        } else {
+            sine_zero_ticks = 0;
+        }
+    }
     tenkhzcounter++;
     ledcounter++;
     one_khz_loop_counter++;
@@ -1254,7 +1423,7 @@ void tenKhzRoutine(){
                     if (armed_timeout_count > LOOP_FREQUENCY_HZ) { // one second
                         if (zero_input_count > 30) {
                             armed = 1;
-                          
+
 #ifdef USE_LED_STRIP
                             //	send_LED_RGB(0,0,0);
                             delayMicros(1000);
@@ -1267,18 +1436,9 @@ void tenKhzRoutine(){
 #endif
                             if ((cell_count == 0) && LOW_VOLTAGE_CUTOFF) {
                                 cell_count = battery_voltage / 370;
-                                for (int i = 0; i < cell_count; i++) {
-                                    playInputTune();
-                                    delayMillis(100);
-                                    RELOAD_WATCHDOG_COUNTER();
-                                }
+                                requestRuntimeTone(7, cell_count);
                             } else {
-#ifdef MCU_AT415
-															play_tone_flag = 4;
-#else
-															playInputTune();
-#endif                        
-
+                                requestRuntimeTone(7, 1);
                             }
                             if (!servoPwm) {
                                 eepromBuffer.rc_car_reverse = 0;
@@ -1306,6 +1466,7 @@ void tenKhzRoutine(){
         }
     }
 
+    serviceRuntimeTone();
 #ifndef BRUSHED_MODE
 if(!beeping){
     if (!stepper_sine) {
@@ -1333,27 +1494,6 @@ if(!beeping){
 //            gpio_mode_QUICK(GPIOB, GPIO_MODE_OUTPUT, GPIO_PULL_NONE, GPIO_PINS_7);
  //           GPIOB->scr = GPIO_PINS_7;
             one_khz_loop_counter = 0;
-            if (play_tone_flag != 0) {
-                switch (play_tone_flag) {
-									
-                case 1:
-                    playDefaultTone();
-                    break;
-                case 2:
-                    playChangedTone();
-                    break;
-                case 3:
-                    playBeaconTune3();
-                    break;
-                case 4:
-                    playInputTune2();
-                    break;
-                case 5:
-                    playDefaultTone();
-                    break;
-                }
-                play_tone_flag = 0;
-            }
             if (use_current_limit && running) {
                 use_current_limit_adjust -= (int16_t)(doPidCalculations(&currentPid, actual_current,
                                                           eepromBuffer.limits.current * 2 * 100)
@@ -1451,11 +1591,22 @@ if(!beeping){
         }
 
         last_duty_cycle = duty_cycle;
-        SET_AUTO_RELOAD_PWM(tim1_arr);
-        SET_DUTY_CYCLE_ALL(adjusted_duty_cycle);
+        uint32_t output_irq_mask = lockMotorOutputs();
+        // Recheck ownership after a possible DShot preemption. Both the period
+        // and duty belong to the tone while beeping, or to the sine loop.
+        if (!beeping && !stepper_sine) {
+            SET_AUTO_RELOAD_PWM(tim1_arr);
+            if (demag_state == DEMAG_RECOVERY_STEP) {
+                SET_DUTY_CYCLE_ALL(adjusted_duty_cycle - (adjusted_duty_cycle >> demag_cut_shift));
+            } else {
+                SET_DUTY_CYCLE_ALL(adjusted_duty_cycle);
+            }
+        }
+        unlockMotorOutputs(output_irq_mask);
         newPacketReceived = 0;
 
     }
+} // !beeping: only motor-drive updates pause during a tone
 #endif // ndef brushed_mode
 #if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)
     if (getInputPinState()) {
@@ -1471,7 +1622,6 @@ if(!beeping){
 signaltimeout++;
 
 #endif
-}
 //GPIOB->clr = GPIO_PINS_7;
 //gpio_mode_QUICK(GPIOB, GPIO_MODE_INPUT, GPIO_PULL_NONE, GPIO_PINS_7);
 
@@ -1561,6 +1711,9 @@ void advanceincrement()
 
 void zcfoundroutine()
 { // only used in polling mode, blocking routine.
+    DISABLE_COM_TIMER_INT(); // cancel any pending demag watchdog, polling commutates directly
+    demag_watch = 0;
+    demag_state = DEMAG_NONE;
     thiszctime = INTERVAL_TIMER_COUNT;
     SET_INTERVAL_TIMER_COUNT(0);
     commutation_interval = (thiszctime + (3 * commutation_interval)) / 4;
@@ -1729,10 +1882,10 @@ int main(void)
         saveEEpromSettings();
     }
 
-    // if (eepromBuffer.use_sine_start) {
+    // if (sineStartEnabled()) {
         //    min_startup_duty = sin_mode_min_s_d;
     // }
-    
+
     if (eepromBuffer.dir_reversed == 1) {
         forward = 0;
     } else {
@@ -1804,7 +1957,7 @@ int main(void)
     playBrushedStartupTune();
 #else
  #ifdef MCU_AT415
-    play_tone_flag = 5;
+    requestRuntimeTone(1, 1);
  #else
     playStartupTune();
 	#endif
@@ -1962,7 +2115,7 @@ if(zero_crosses < 5){
         if (zero_crosses > 100 && adjusted_input < 200) {
             bemf_timeout_happened = 0;
         }
-        if (eepromBuffer.use_sine_start && adjusted_input < 160) {
+        if (sineStartEnabled() && adjusted_input < 160) {
             bemf_timeout_happened = 0;
         }
 
@@ -2083,7 +2236,10 @@ if(zero_crosses < 5){
         }
 #endif
         stuckcounter = 0;
-        if (stepper_sine == 0) {
+        if (beeping) {
+            e_rpm = 0;
+            k_erpm = 0;
+        } else if (stepper_sine == 0) {
 
             e_rpm = running * (600000 / e_com_time); // in tens of rpm
             k_erpm = e_rpm / 10; // ecom time is time for one electrical revolution in microseconds
@@ -2174,33 +2330,61 @@ if(zero_crosses < 5){
             }
 #else
 
-            if (input > 48 && armed) {
+            if (input > 47 && armed) {
 
-                if (input > 48 && input < 137) { // sine wave stepper
+                // Timed startup is driven by elapsed time, never throttle magnitude.
+                uint8_t timed_start = eepromBuffer.use_sine_start == SINE_START_ONCE;
+                uint32_t ramp_ticks = sine_start_ticks;
+                if (do_once_sinemode && (timed_start || input < 137)) {
+                    // disable commutation interrupt in case set
+                    DISABLE_COM_TIMER_INT();
+                    maskPhaseInterrupts();
+                    allOff();
+                    SET_DUTY_CYCLE_ALL(0);
+                    SET_PRESCALER_PWM(0);
+                    SET_AUTO_RELOAD_PWM(TIMER1_MAX_ARR);
+                    generatePwmTimerEvent(); // commit zero duty before enabling PWM pins
+                    allpwm();
+                    do_once_sinemode = 0;
+                }
+                if ((timed_start && !sine_exit_requested && ramp_ticks < SINE_START_TICKS)
+                    || (!timed_start && input < 137)) { // sine wave stepper
 
-                    if (do_once_sinemode) {
-                        // disable commutation interrupt in case set
-                        DISABLE_COM_TIMER_INT();
-                        maskPhaseInterrupts();
-                        SET_DUTY_CYCLE_ALL(0);
-                        allpwm();
-                        do_once_sinemode = 0;
-                    }
                     advanceincrement();
-                    step_delay = map(input, 48, 120, 7000 / eepromBuffer.motor_poles, 810 / eepromBuffer.motor_poles);
+                    if (timed_start) {
+                        uint32_t slow_delay = SINE_START_SLOW_DELAY;
+                        uint32_t fast_delay = SINE_START_FAST_DELAY;
+                        step_delay = slow_delay - ((slow_delay - fast_delay) * ramp_ticks) / SINE_START_TICKS;
+                        // A packet can request exit while this step is being prepared.
+                        if (sine_exit_requested) {
+                            step_delay = sine_exit_delay;
+                        }
+                    } else {
+                        step_delay = map(input, 48, 120, 7000 / eepromBuffer.motor_poles, 810 / eepromBuffer.motor_poles);
+                    }
                     delayMicros(step_delay);
                     e_rpm = 600 / step_delay; // in hundreds so 33 e_rpm is 3300 actual erpm
 
                 } else {
-                    do_once_sinemode = 1;
+                    if (!timed_start) {
+                        do_once_sinemode = 1;
+                    }
                     advanceincrement();
-                    if (input > 200) {
+                    if (timed_start) {
+                        // Early exit finishes this electrical revolution at its last speed.
+                        // Normal completion reaches maximum sine speed before handoff.
+                        step_delay = sine_exit_requested
+                            ? sine_exit_delay : SINE_START_FAST_DELAY;
+                    } else if (input > 200) {
                         phase_A_position = 0;
                         step_delay = 80;
                     }
 
                     delayMicros(step_delay);
                     if (phase_A_position == 0) {
+                        if (eepromBuffer.use_sine_start == SINE_START_ONCE) {
+                            sine_start_state = 2;
+                        }
                         stepper_sine = 0;
                         running = 1;
                         old_routine = 1;
@@ -2217,26 +2401,34 @@ if(zero_crosses < 5){
                         }
                         commutate();
                         generatePwmTimerEvent();
+                        if (timed_start) {
+                            // Recompute normal duty from the original idle throttle now.
+                            setInput();
+                        }
                     }
                 }
 
             } else {
-                do_once_sinemode = 1;
-                if (eepromBuffer.brake_on_stop) {
+                uint32_t idle_irq_mask = lockMotorOutputs();
+                if (!beeping && !(input > 47 && armed)) {
+                    do_once_sinemode = 1;
+                    if (eepromBuffer.brake_on_stop) {
 #ifndef PWM_ENABLE_BRIDGE
-                    duty_cycle = (TIMER1_MAX_ARR - 19) + eepromBuffer.drag_brake_strength * 2;
-                    adjusted_duty_cycle = TIMER1_MAX_ARR - ((duty_cycle * tim1_arr) / TIMER1_MAX_ARR) + 1;
-                    proportionalBrake();
-                    SET_DUTY_CYCLE_ALL(adjusted_duty_cycle);
-                    prop_brake_active = 1;
+                        duty_cycle = (TIMER1_MAX_ARR - 19) + eepromBuffer.drag_brake_strength * 2;
+                        adjusted_duty_cycle = TIMER1_MAX_ARR - ((duty_cycle * tim1_arr) / TIMER1_MAX_ARR) + 1;
+                        proportionalBrake();
+                        SET_DUTY_CYCLE_ALL(adjusted_duty_cycle);
+                        prop_brake_active = 1;
 #else
-                    // todo add braking for PWM /enable style bridges.
+                        // todo add braking for PWM /enable style bridges.
 #endif
-                } else {
-                    SET_DUTY_CYCLE_ALL(0);
-                    allOff();
+                    } else {
+                        SET_DUTY_CYCLE_ALL(0);
+                        allOff();
+                    }
+                    e_rpm = 0;
                 }
-                e_rpm = 0;
+                unlockMotorOutputs(idle_irq_mask);
             }
 
 #endif // gimbal mode

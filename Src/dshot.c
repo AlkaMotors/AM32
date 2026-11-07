@@ -32,7 +32,7 @@ extern int zero_crosses;
 extern char send_telemetry;
 extern uint8_t max_duty_cycle_change;
 int dshot_full_number;
-extern char play_tone_flag;
+
 extern char send_esc_info_flag;
 uint8_t command_count = 0;
 uint8_t last_command = 0;
@@ -86,6 +86,10 @@ void computeDshotDMA()
         int tocheck = (dpulse[0] << 10 | dpulse[1] << 9 | dpulse[2] << 8 | dpulse[3] << 7 | dpulse[4] << 6 | dpulse[5] << 5 | dpulse[6] << 4 | dpulse[7] << 3 | dpulse[8] << 2 | dpulse[9] << 1 | dpulse[10]);
 
         if (calcCRC == checkCRC) {
+            sine_dshot_zero = (tocheck == 0);
+            if (!sine_dshot_zero) {
+                sine_zero_ticks = 0;
+            }
             signaltimeout = 0;
             dshot_goodcounts++;
             if (dpulse[11] == 1) {
@@ -110,6 +114,14 @@ void computeDshotDMA()
                   }
                 }
                 return; // don't process dshot signal when in programming mode
+            }
+            if (tocheck >= 1 && tocheck <= 5 && motorOperationActive()) {
+                // Beacons are commands, not zero throttle. Ignore them before
+                // command decoding can overwrite the active throttle request.
+                dshotcommand = 0;
+                command_count = 0;
+                cancelRuntimeTone();
+                return;
             }
             if (tocheck > 47) {
                 if (EDT_ARMED) {
@@ -163,7 +175,7 @@ void computeDshotDMA()
                     last_command = dshotcommand;
                     command_count = 0;
                 }
-                if (dshotcommand < 5) { // beacons
+                if (dshotcommand <= 5) { // all beacons execute immediately
                     command_count = 6; // go on right away
                 }
                 command_count++;
@@ -172,19 +184,11 @@ void computeDshotDMA()
                     switch (dshotcommand) { // todo
 
                     case 1:
-                        play_tone_flag = 1;
-                        break;
                     case 2:
-                        play_tone_flag = 2;
-                        break;
                     case 3:
-                        play_tone_flag = 3;                        
-                        break;
                     case 4:
-                        play_tone_flag = 4;
-                        break;
                     case 5:
-                        play_tone_flag = 5;
+                        requestDshotBeacon(dshotcommand);
                         break;
                     case 6:
                         send_esc_info_flag = 1;
@@ -207,7 +211,7 @@ void computeDshotDMA()
                         break;
                     case 12:
                         saveEEpromSettings();
-                        play_tone_flag = 1 + eepromBuffer.dir_reversed;
+                        requestRuntimeTone(1 + eepromBuffer.dir_reversed, 1);
                         //	NVIC_SystemReset();
                         break;
                     case 13:
@@ -223,9 +227,11 @@ void computeDshotDMA()
                         //	make_dshot_package();
                         break;
                     case 20:
+                        setSineTurtleOverride(0);
                         forward = 1 - eepromBuffer.dir_reversed;
                         break;
                     case 21:
+                        setSineTurtleOverride(1);
                         forward = eepromBuffer.dir_reversed;
                         break;
 #ifndef MCU_F031
@@ -269,7 +275,7 @@ void make_dshot_package(uint16_t com_time)
         dshot_full_number = send_extended_dshot;
         send_extended_dshot = 0;
     } else {
-        if (!running) {
+        if (beeping || !running) {
             com_time = 65535;
         }
         //	calculate shift amount for data in format eee mmm mmm mmm, first 1 found

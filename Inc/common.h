@@ -20,7 +20,7 @@ extern uint16_t zero_input_count;
 extern uint16_t signaltimeout;
 extern uint16_t input;
 extern uint16_t newinput;
-extern char play_tone_flag;
+
 extern uint32_t current_GPIO_PIN;
 extern char ic_timer_prescaler;
 extern uint8_t buffersize;
@@ -30,7 +30,7 @@ extern uint16_t battery_voltage;
 extern int16_t actual_current;
 extern uint16_t e_rpm;
 extern uint32_t average_interval;
-extern uint8_t beeping;
+extern volatile uint8_t beeping;
 extern uint16_t dshot_badcounts;
 extern uint16_t dshot_frametime;
 extern uint16_t DMA_start_bit;
@@ -94,3 +94,10 @@ enum inputType {
     EDTARM_IN = 4,
     DRONECAN_IN = 5,
 };
+
+extern volatile uint32_t sine_zero_ticks;
+extern volatile uint8_t sine_dshot_zero;
+
+void setSineTurtleOverride(uint8_t enabled);
+
+uint8_t motorOperationActive(void);

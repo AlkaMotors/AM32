@@ -11,16 +11,18 @@
 #include "main.h"
 
 void playStartupTune(void);
-void playInputTune(void);
 void playBrushedStartupTune(void);
-void playInputTune2(void);
-void playBeaconTune3(void);
-void playDuskingTune(void);
-void playDefaultTone(void);
-void playChangedTone(void);
 
 void setVolume(uint8_t volume);
 
 extern void delayMillis(uint32_t millis);
+
+void requestDshotBeacon(uint8_t command);
+void requestRuntimeTone(uint8_t tone, uint8_t repeats);
+// Short bridge ownership transactions; restore the caller's interrupt mask.
+uint32_t lockMotorOutputs(void);
+void unlockMotorOutputs(uint32_t mask);
+void cancelRuntimeTone(void);
+void serviceRuntimeTone(void);
 
 #endif /* SOUNDS_H_ */

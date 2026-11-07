@@ -64,7 +64,7 @@ void computeServoInput()
                         servo_high_threshold = servo_high_threshold - 25;
                         eepromBuffer.servo.high_threshold = (servo_high_threshold - 1750) / 2;
                         high_calibration_set = 1;
-                        playDefaultTone();
+                        requestRuntimeTone(1, 1);
                     }
                 }
                 last_high_threshold = servo_high_threshold;
@@ -80,7 +80,7 @@ void computeServoInput()
                     calibration_required = 0;
                     saveEEpromSettings();
                     low_calibration_counts = 0;
-                    playChangedTone();
+                    requestRuntimeTone(2, 1);
                 }
             }
             signaltimeout = 0;
@@ -187,7 +187,7 @@ void transfercomplete()
                     }
 
                     if (enter_calibration_count > 50 && (!high_calibration_set)) {
-                        playBeaconTune3();
+                        requestRuntimeTone(6, 1);
                         calibration_required = 1;
                         enter_calibration_count = 0;
                     }

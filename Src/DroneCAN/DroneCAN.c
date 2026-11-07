@@ -152,7 +152,7 @@ static const struct parameter {
         { "BEEP_VOLUME",            T_UINT8, 0, 11,  5, &eepromBuffer.beep_volume},
         { "VARIABLE_PWM",           T_BOOL,  0, 1,   1, &eepromBuffer.variable_pwm},
         { "PWM_FREQUENCY",          T_UINT8, 8, 48,  24, &eepromBuffer.pwm_frequency},
-        { "USE_SIN_START",          T_BOOL,  0, 1,   0, &eepromBuffer.use_sine_start},
+        { "USE_SIN_START",          T_UINT8, 0, 2,   0, &eepromBuffer.use_sine_start},
         { "COMP_PWM",               T_BOOL,  0, 1,   1, &eepromBuffer.comp_pwm},
         { "STUCK_ROTOR_PROTECTION", T_BOOL,  0, 1,   1, &eepromBuffer.stuck_rotor_protection},
         { "ADVANCE_LEVEL",          T_UINT8, 0, 4,   2, &eepromBuffer.advance_level},
@@ -171,6 +171,8 @@ static const struct parameter {
         { "CAN_TERM_ENABLE",        T_BOOL,  0, 1,   0, &eepromBuffer.can.term_enable},
 #endif
         { "STARTUP_TUNE",           T_STRING,0, 4,   0, &eepromBuffer.tune},
+        // 0 = off, 1 = coast only, 2/3/4 = 1/32, 1/16, 1/8 recovery power cut
+        { "DEMAG_COMP",             T_UINT8, 0, 4,   0, &eepromBuffer.demag_comp},
 };
 
 /*
@@ -486,6 +488,7 @@ static void handle_param_ExecuteOpcode(CanardInstance* ins, CanardRxTransfer* tr
 	    can_printf("resetting to defaults");
             memset(eepromBuffer.buffer, 0xff, sizeof(eepromBuffer.buffer));
             memcpy(eepromBuffer.buffer, default_settings, sizeof(default_settings));
+            eepromBuffer.demag_comp = 0;
             save_flash_nolib(eepromBuffer.buffer, sizeof(eepromBuffer.buffer), eeprom_address);
             loadEEpromSettings();
             load_settings();
@@ -1024,7 +1027,7 @@ static void send_ESCStatus(void)
     current.count = 0;
 
     pkt.temperature = C_TO_KELVIN(degrees_celsius);
-    pkt.rpm = (e_rpm * 200) / eepromBuffer.motor_poles;
+    pkt.rpm = beeping ? 0 : (e_rpm * 200) / eepromBuffer.motor_poles;
     pkt.power_rating_pct = 0; // how do we get this?
     pkt.esc_index = eepromBuffer.can.esc_index;
 

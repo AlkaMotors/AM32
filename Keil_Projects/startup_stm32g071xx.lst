@@ -373,11 +373,11 @@ ARM Macro Assembler    Page 6
               00000000 
               00000000 
 Command Line: --debug --xref --diag_suppress=9931,A1950W --cpu=Cortex-M0+ --dep
-end=.\objects\startup_stm32g071xx.d -o.\objects\startup_stm32g071xx.o -IC:\Keil
-Packs\Keil\STM32G0xx_DFP\1.4.0\Drivers\CMSIS\Device\ST\STM32G0xx\Include --pred
-efine="__EVAL SETA 1" --predefine="__MICROLIB SETA 1" --predefine="__UVISION_VE
-RSION SETA 538" --predefine="STM32G071xx SETA 1" --list=startup_stm32g071xx.lst
- ..\Mcu\g071\Startup\mdk\startup_stm32g071xx.s
+end=.\objects\startup_stm32g071xx.d -o.\objects\startup_stm32g071xx.o -IC:\User
+s\p\AppData\Local\Arm\Packs\Keil\STM32G0xx_DFP\2.0.0\Drivers\CMSIS\Device\ST\ST
+M32G0xx\Include --predefine="__EVAL SETA 1" --predefine="__MICROLIB SETA 1" --p
+redefine="__UVISION_VERSION SETA 543" --predefine="STM32G071xx SETA 1" --list=s
+tartup_stm32g071xx.lst ..\Mcu\g071\Startup\mdk\startup_stm32g071xx.s
 
 
 
